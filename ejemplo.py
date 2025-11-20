@@ -10,46 +10,66 @@ obs, _ = env.reset()
 done = False
 step_count = 0
 
-print("\n=== INICIO DE LA MANO ===")
-env.render()
-
 initial_stack = env.stacks[0]
 
-# Demo loop: el agente hace acciones aleatorias (luego se reemplaza por RL)
-while not done:
-    step_count += 1
-    # Acción del agente: fold/call/bet/raise aleatorio
-    action = env.action_space.sample()
-    obs, reward, done, truncated, info = env.step(action)
+# === Demo: 10 manos con blinds rotativos y steps visibles ===
 
-    print(f"\n--- Step {step_count} ---")
-    print(f"Agente tomó acción: {env.ACTIONS[action]}")
-    env.render()
+num_hands = 10
 
-final_stack = env.stacks[0]
-net_gain = final_stack - initial_stack
+# Guardar estado inicial del deck y del board
+initial_deck_state = env.deck.cards.copy()
+initial_board = env.board.copy()
 
-# Crear hands_final incluyendo agente incluso si foldeó
-hands_final = [(i, hand) for i, hand in enumerate(env.hands) if env.active_players[i]]  # jugadores activos
-# Añadir agente si foldeó
-if not env.active_players[env.agent_id]:
-    hands_final.append((env.agent_id, env.hands[env.agent_id]))
+for hand_idx in range(num_hands):
+    print(f"\n=== MANO {hand_idx+1} ===")
 
-# Mostrar las manos de todos los jugadores al final
-print("\n=== CARTAS DE TODOS LOS JUGADORES AL FINAL ===")
-for i, hand in hands_final:
-    hand_str = [Card.int_to_str(c) for c in hand]  # convertir a 'As','Kd', etc.
-    if i == env.agent_id:
-        print(f"Agente: {hand_str}")
-    else:
-        print(f"Jugador {i+1}: {hand_str}")
+    # Reset parcial de la mano con blinds rotativos
+    obs = env.partial_reset()  # repartirá nuevas manos y asignará SB/BB
+    done = False
+    step_count = 0
+    initial_stack = env.stacks[env.agent_id]
 
+    while not done:
+        step_count += 1
 
-print("\n=== FIN DE LA MANO ===")
-print(f"Stack inicial del agente: {initial_stack}")
-print(f"Stack final del agente: {final_stack}")
-print(f"Fichas ganadas/perdidas: {net_gain}")
-print(f"Reward final del agente: {reward}")
+        # Acción del agente (ejemplo aleatoria, reemplaza por tu RL)
+        action = env.action_space.sample()
+        obs, reward, done, truncated, info = env.step(action)
+
+        print(f"\n--- Step {step_count} ---")
+        print(f"Agente tomó acción: {env.ACTIONS[action]}")
+        env.render()  # muestra estado actual (board, bets, stacks)
+
+    final_stack = env.stacks[env.agent_id]
+    net_gain = final_stack - initial_stack
+
+    # Mostrar board bonito
+    print("\n=== CARTAS EN EL TABLERO ===")
+    Card.print_pretty_cards(env.board)
+
+    # Mostrar manos de todos los jugadores
+    active_hands = [(i, env.hands[i]) for i, active in enumerate(env.active_players) if active]
+    print("\n=== MANOS DE LOS JUGADORES ===")
+    for i, hand in active_hands:
+        name = "Agente" if i == env.agent_id else f"Jugador {i+1}"
+        print(f"{name}: ", end="")
+        Card.print_pretty_cards(hand)
+
+    # Mostrar ganador(es)
+    winner_names = ["Agente" if w == env.agent_id else f"Jugador {w+1}" for w in env.winners]
+    print("\n=== GANADOR(ES) ===")
+    print(", ".join(winner_names))
+
+    # Mostrar reward y stacks
+    print("\n=== FIN DE LA MANO ===")
+    print(f"Stack inicial del agente: {initial_stack}")
+    print(f"Stack final del agente: {final_stack}")
+    print(f"Fichas ganadas/perdidas: {net_gain}")
+    print(f"Reward final del agente: {reward}")
+
+    # Restaurar board y deck para la próxima mano
+    env.board = initial_board.copy()
+    env.deck.cards = initial_deck_state.copy()
 
 print("=====================================")
 print("=====================================")
