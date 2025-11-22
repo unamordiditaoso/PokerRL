@@ -32,13 +32,20 @@ for hand_idx in range(num_hands):
     while not done:
         step_count += 1
 
-        # Acción del agente (ejemplo aleatoria, reemplaza por tu RL)
-        action = env.action_space.sample()
+        print(f"\n--- Step {step_count} ---")
+      
+        # Obtener acciones legales para el agente
+        legal_actions = env.get_legal_actions(env.agent_id)
+        
+        # Elegir una acción aleatoria entre las legales     
+        if not legal_actions:
+            # No hay acciones legales, por ejemplo agente ya foldeó o all-in
+            action = None
+        else:
+            action = random.choice(legal_actions)
+        
         obs, reward, done, truncated, info = env.step(action)
 
-        print(f"\n--- Step {step_count} ---")
-        print(f"Agente tomó acción: {env.ACTIONS[action]}")
-        env.render()  # muestra estado actual (board, bets, stacks)
 
     final_stack = env.stacks[env.agent_id]
     net_gain = final_stack - initial_stack
