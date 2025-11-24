@@ -1,4 +1,3 @@
 - Manejar all-ins
-- Poner bien acciones de los oponentes (si foldea cuando current bet = 0 ---> check)
 - Iniciar entrenamiento ( Guardar modelo, Gráficas de tensorboard)
 - Dar Stack infinito a lo agentes para primeros intentos (SIN ALL-IN)
