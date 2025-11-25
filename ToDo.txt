@@ -1,3 +1,6 @@
-- Manejar all-ins
-- Iniciar entrenamiento ( Guardar modelo, Gráficas de tensorboard)
-- Dar Stack infinito a lo agentes para primeros intentos (SIN ALL-IN)
+SIGUIENTES PASOS:
+- Iniciar entrenamiento ( Guardar modelo, Gráficas de tensorboard )
+
+PASOS EXTRA:
+- All-in se maneja, pero no correctamente (En caso, de tener tiempo cambiarlo)
+- Ver la reward de los pasos intermedios (Recompensar en base a lo apostado, además del equity)

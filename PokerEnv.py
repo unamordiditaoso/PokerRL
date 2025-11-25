@@ -94,6 +94,7 @@ class Poker5EnvFull(Env):
         self.evaluator = Evaluator()
         self.board = []
         self.stacks = [self.starting_stack]*self.num_players
+        self.all_in = [False] * self.num_players
         self.pot = 0
         self.current_bet = self.big_blind
         self.bets = [0]*self.num_players
@@ -187,6 +188,10 @@ class Poker5EnvFull(Env):
                 opp_action = self.opponent_policies[player_id-1](self._get_obs())
                 self._apply_action(player_id, opp_action)
 
+            if sum(self.all_in) >= 1:
+                self.done = True
+                break
+
             # Terminar si solo queda un jugador
             if sum(self.active_players) <= 1:
                 self.done = True
@@ -213,11 +218,36 @@ class Poker5EnvFull(Env):
             elif self.round_stage == 'turn':
                 self.board += self.deck.draw(1)  # river
                 self.round_stage = 'river'
-
-            self.done = self.round_stage == 'river'
+            elif self.round_stage == 'river':
+                self.done = True
         
         if self.done:
             self._resolve_hand()
+        else:
+            if not self.agent_folded:
+                hero_str = cards_int_to_str(self.hands[self.agent_id])
+                board_str = cards_int_to_str(self.board)
+                equity = estimate_equity(hero_str, board_str=board_str, num_opponents=sum(self.active_players)-1, iters=2000)['win_prob']
+                if self.round_stage == 'preflop':
+                    if equity > (1 / sum(self.active_players) + 2):
+                        self.reward += 10 * equity
+                    else:
+                        self.reward -= 1 / equity
+                elif self.round_stage == 'flop':
+                    if equity > (1 / sum(self.active_players) + 1):
+                        self.reward += 10 * equity
+                    else:
+                        self.reward -= 1 / equity
+                elif self.round_stage == 'turn':
+                    if equity > (1 / sum(self.active_players)):
+                        self.reward += 10 * equity
+                    else:
+                        self.reward -= 1 / equity
+                elif self.round_stage == 'river':
+                    if equity > (1 / sum(self.active_players)):
+                        self.reward += 10 * equity
+                    else:
+                        self.reward -= 1 / equity
 
         return self._get_obs(), self.reward, self.done, False, {}
 
@@ -254,11 +284,12 @@ class Poker5EnvFull(Env):
         return legal
 
     def _apply_action(self, player_id, action):
-        if not self.active_players[player_id]:
+        if not self.active_players[player_id] or self.all_in[player_id]:
             return
         
         player_bet = self.bets[player_id]
         accion_opp = ""
+        stack = self.stacks[player_id]
 
         if action == 0 and player_bet == self.current_bet:
             print(f"Jugador {player_id + 1} tomó acción: Check")
@@ -273,43 +304,63 @@ class Poker5EnvFull(Env):
                 
         # Acción call
         elif action == 2:
-            to_call = self.current_bet - self.bets[player_id]
-            to_call = min(to_call, self.stacks[player_id])
+            to_call = self.current_bet - player_bet
 
-            if to_call == 0:
+            if to_call <= 0:
                 accion_opp = "Check"
+                amount = 0
+            
+            elif to_call >= stack:
+                accion_opp = "Call (All-in)"
+                self.all_in[player_id] = True
+                amount = stack
             else:
                 accion_opp = "Call"
+                amount = to_call
 
-            self.stacks[player_id] -= to_call
-            self.bets[player_id] += to_call
-            self.pot += to_call
+            self.stacks[player_id] -= amount
+            self.bets[player_id] += amount
+            self.pot += amount
 
         # Acción bet
         elif action == 3:
-            if self.current_bet == 0:
-                to_bet = self.big_blind
-                accion_opp = "Bet"
+            if self.current_bet > 0:
+                return self._apply_action(player_id, 2)
+
+            if stack <= self.big_blind:
+                self.all_in[player_id] = True
+                accion_opp = "Bet (All-in)"
+                amount = stack
             else:
-                to_bet = self.current_bet
-                accion_opp = "Call"
-            to_bet = min(to_bet, self.stacks[player_id])
-            self.stacks[player_id] -= to_bet
-            self.bets[player_id] += to_bet
-            self.pot += to_bet
+                accion_opp = "Bet"
+                amount = self.big_blind
+                
+
+            self.stacks[player_id] -= amount
+            self.bets[player_id] += amount
+            self.pot += amount
             self.current_bet = self.bets[player_id]
 
         # Acción raise
         elif action == 4:
-            accion_opp = "Raise"
+
             if self.current_bet == 0:
-                to_raise = 2*self.big_blind
+                to_raise = 2 * self.big_blind
             else:
-                to_raise = 2*self.current_bet
-            to_raise = min(to_raise, self.stacks[player_id])
-            self.stacks[player_id] -= to_raise
-            self.bets[player_id] += to_raise
-            self.pot += to_raise
+                to_raise = 2 * self.current_bet
+            
+            if stack + player_bet <= to_raise:
+                accion_opp = "Raise (All-in)"
+                amount = stack
+                self.all_in[player_id] = True
+            else:
+                accion_opp = "Raise"
+                amount = to_raise - player_bet
+
+            self.stacks[player_id] -= amount
+            self.bets[player_id] += amount
+            self.pot += amount
+            
             self.current_bet = self.bets[player_id]
         
         if player_id != 0: 
@@ -324,15 +375,27 @@ class Poker5EnvFull(Env):
             self.winners = [winner_id]
             self.stacks[winner_id] += self.pot  # adjudicar pot
 
+        elif sum(self.all_in) > 0:
+            self.board += self.deck.draw(5 - len(self.board))
+            scores = [(i, self.evaluator.evaluate(hand, self.board)) for i, hand in active_hands]
+            min_score = min([s for i,s in scores])
+            self.winners = [i for i,s in scores if s==min_score]
+
+            share = self.pot // len(self.winners)
+
+            for w in self.winners:
+                self.stacks[w] += share
+
         else:
             scores = [(i, self.evaluator.evaluate(hand, self.board)) for i, hand in active_hands]
             min_score = min([s for i,s in scores])
             self.winners = [i for i,s in scores if s==min_score]
 
-            share = self.pot // len(self.winners)   # dividir el pot entre ganadores
+            share = self.pot // len(self.winners)
+
             for w in self.winners:
-                self.stacks[w] += share        # sumar fichas al stack del ganador
-                                  
+                self.stacks[w] += share
+
         self.pot = 0 # limpiar el pot
 
         stack_change = self.stacks[self.agent_id] - self.preflop_stack
