@@ -10,9 +10,9 @@ from PokerEnv import Poker5EnvFull  # tu entorno
 # Parámetros de entrenamiento
 # ===========================
 SEED = 42
-TOTAL_TIMESTEPS = 2_000_000
-EVAL_FREQ = 5000
-N_EVAL_EPISODES = 5
+TOTAL_TIMESTEPS = 20_000
+EVAL_FREQ = 500
+N_EVAL_EPISODES = 30
 REWARD_TARGET = 500  # ajusta según tu entorno
 CHECKPOINT_DIR = "./checkpoints_poker/"
 TENSORBOARD_DIR = "./tensorboard_poker/"
@@ -30,13 +30,14 @@ class PokerPartialResetWrapper(gym.Wrapper):
     - Compatible con SB3 DummyVecEnv
     """
     def reset(self, *, seed=None, options=None):
-        obs = self.env.partial_reset()  # reset de la mano
-        return obs, {}  # devuelve obs e info vacío
+        obs = self.env.partial_reset()
+
+        return obs, {}
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         done = terminated or truncated
-        return obs, reward, done, info
+        return obs, reward, done, truncated, info
 
 # ===========================
 # Crear entornos
