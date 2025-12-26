@@ -71,7 +71,7 @@ class Poker5EnvFull(Env):
         # Observación simplificada
         self.observation_space = spaces.Dict({
             "hero_hand": spaces.MultiDiscrete([52, 52]),
-            "board": spaces.MultiDiscrete([52]*5),
+            "board": spaces.MultiDiscrete([52+1]*5),
             "stacks": spaces.Box(low=0, high=np.inf, shape=(self.num_players,), dtype=np.float32),
             "pot": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32),
             "current_bet": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32)
@@ -180,7 +180,7 @@ class Poker5EnvFull(Env):
         #board = self.board + [None]*(5-len(self.board))
         return {
             "hero_hand": [self.card_as_index(c) for c in self.hands[self.agent_id]],
-            "board": [self.card_as_index(c) if c is not None else 0 for c in board],
+            "board": [self.card_as_index(c) if c is not None else 52 for c in board],
             "stacks": np.array(self.stacks, dtype=np.float32),
             "pot": np.array([self.pot], dtype=np.float32),
             "current_bet": np.array([self.current_bet], dtype=np.float32),

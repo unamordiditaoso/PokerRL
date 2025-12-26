@@ -79,10 +79,17 @@ while running:
                 screen.blit(BACK_CARD, (x + j*100, y))
 
     # --- Dibujar cartas comunitarias ---
-    board_idx = obs.get("board", [])  # lista vacía si no hay cartas aún
-    board_str = cards_idx_to_str(board_idx)
-    for j, card in enumerate(board_str):
-        screen.blit(load_card(card), (BOARD_POSITION[0] + j*BOARD_SPACING, BOARD_POSITION[1]))
+    board_idx = obs.get("board", [])  # lista de 5 elementos, None si no hay carta
+    
+    for j, idx in enumerate(board_idx):
+        x = BOARD_POSITION[0] + j*BOARD_SPACING
+        y = BOARD_POSITION[1]
+
+        if idx is not None and idx != 52:  # 52 = valor reservado para "no hay carta"
+            card_str = card_idx_to_str(idx)
+            screen.blit(load_card(card_str), (x, y))
+        else:
+            screen.blit(BACK_CARD, (x, y))
 
     pygame.display.flip()
 
