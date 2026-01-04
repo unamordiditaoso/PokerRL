@@ -46,6 +46,18 @@ class Poker5EnvFull(Env):
     metadata = {"render_modes": ["human"], "render_fps": 1}
 
     ACTIONS = ["Fold", "Check", "Call", "Bet", "Raise"]
+    HAND_RANK_REWARD = {
+        9: -0.2,   # High Card
+        8:  0.2,   # Pair
+        7:  0.6,   # Two Pair
+        6:  1.0,   # Trips
+        5:  1.5,   # Straight
+        4:  1.8,   # Flush
+        3:  2.5,   # Full House
+        2:  3.5,   # Quads
+        1:  5.0,   # Straight Flush
+        0:  6.0    # Royal 
+    }
 
     def _log(self, msg):
         with open(self.log_path, "a") as f:
@@ -56,7 +68,7 @@ class Poker5EnvFull(Env):
         self.log_path = "env.log"
 
         self.opponent_policies = opponent_policies
-        self.dealer_pos = 0  # posición del botón, rota cada mano
+        self.dealer_pos = 0
         self.num_players = 5
         self.agent_id = 0
         self.agent_folded = False
@@ -74,7 +86,9 @@ class Poker5EnvFull(Env):
             "board": spaces.MultiDiscrete([52+1]*5),
             "stacks": spaces.Box(low=0, high=np.inf, shape=(self.num_players,), dtype=np.float32),
             "pot": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32),
-            "current_bet": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32)
+            "current_bet": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32),
+            "active_players": spaces.MultiBinary(self.num_players),
+            "hand_rank": spaces.Discrete(10)
         })
 
         self.reset()
@@ -112,7 +126,10 @@ class Poker5EnvFull(Env):
         
         self.deck.shuffle()
         
-        self.hands = [self.deck.draw(2) for _ in range(self.num_players)]
+        self.hands = [
+            sorted(self.deck.draw(2), key=lambda c: Card.get_rank_int(c), reverse=True)
+            for _ in range(self.num_players)
+        ]
 
         print("Hero Hand:")
         Card.print_pretty_cards(self.hands[self.agent_id])
@@ -123,7 +140,7 @@ class Poker5EnvFull(Env):
         self.bets = [0] * self.num_players
         self.all_in = [False] * self.num_players
         self.all_check = [False] * self.num_players
-        self.current_bet = self.big_blind
+        self.current_bet = self.big_blind + self.small_blind
         self.pot = 0
 
         self.round_stage = 'preflop'
@@ -174,6 +191,40 @@ class Poker5EnvFull(Env):
         suit_index = {1:0, 2:1, 4:2, 8:3}[suit]
         return rank + 13 * suit_index  # 0..51
 
+    def get_hand_rank(self, hero_hand, board):
+        # hero_hand: [int, int] (0–51)
+        # board: [int,...] con 52 como carta vacía
+
+        hand = hero_hand
+        board_cards = [c for c in board if c != 52]
+
+        if len(board_cards) < 3:
+            # Preflop o sin info suficiente
+            return 9  # High Card por defecto
+
+        score = self.evaluator.evaluate(hand, board_cards)
+        return self.evaluator.get_rank_class(score)
+
+    def preflop_hand_strength(self, hero_hand):
+        ranks = sorted([c % 13 for c in hero_hand])
+        suited = hero_hand[0] // 13 == hero_hand[1] // 13
+
+        if ranks[0] == ranks[1]:
+            if max(ranks) >= 6:
+                return 1.0
+            else:
+                return 0.6
+        if suited and max(ranks) >= 8:
+            if ranks[0] == ranks[1] + 1:
+                return 0.7
+            else:
+                return 0.4
+        if max(ranks) >= 10:
+            return 0.5
+        if ranks[0] == ranks[1] + 1:
+            return 0.1
+        return -0.2
+
     def _get_obs(self):
         board = self.board[:5]  # solo primeros 5
         board += [None]*(5-len(board))
@@ -184,7 +235,8 @@ class Poker5EnvFull(Env):
             "stacks": np.array(self.stacks, dtype=np.float32),
             "pot": np.array([self.pot], dtype=np.float32),
             "current_bet": np.array([self.current_bet], dtype=np.float32),
-            "active_players": self.active_players.copy(),
+            "active_players": np.array(self.active_players, dtype=np.int8),
+            "hand_rank": self.get_hand_rank(self.hands[self.agent_id], self.board)
         }
 
     def step(self, action=None):
@@ -196,6 +248,7 @@ class Poker5EnvFull(Env):
             f"board={cards_int_to_str(self.board)}"
         )
 
+        self.hand_rank = self.get_hand_rank(self.hands[self.agent_id], self.board)
         self.done = False
         ronda_done = True
         self.reward = 0
@@ -229,7 +282,7 @@ class Poker5EnvFull(Env):
                 opp_action = self.opponent_policies[player_id-1](self._get_obs())
                 self._apply_action(player_id, opp_action)
                 self._log(f"ACTION | player={player_id} | "
-                                f"action={self.ACTIONS[action]} | "
+                                f"action={self.ACTIONS[opp_action]} | "
                                 f"stack={self.stacks[player_id]} | "
                                 f"bet={self.bets[player_id]} | "
                                 f"pot={self.pot}")
@@ -250,6 +303,7 @@ class Poker5EnvFull(Env):
             if self.ACTIONS[action] == "Check":
                 self.all_check[player_id] = True
 
+        self._log(f"APUESTA ACTUAL: {self.current_bet}")
         bets_activas = [self.bets[i] for i, active in enumerate(self.active_players) if active]
         ronda_done = len(set(bets_activas)) == 1 or sum(self.all_check) == 5
 
@@ -282,39 +336,31 @@ class Poker5EnvFull(Env):
             self._log(f"RESOLVER MANO")
             self._resolve_hand()
         else:
+            strength = self.preflop_hand_strength(self.hands[self.agent_id])
+
             if not self.agent_folded:
-                self._log(f"RONDA NO TERMINADA")
-                hero_str = cards_int_to_str(self.hands[self.agent_id])
-                board_str = cards_int_to_str(self.board[:5])
-                equity = estimate_equity(hero_str, board_str=board_str, num_opponents=sum(self.active_players)-1, iters=2000)['win_prob']
-                if self.round_stage == 'preflop':
-                    if equity > (1 / sum(self.active_players) + 2):
-                        self.reward += 10 * equity
+                if self.hand_rank is not None:
+                    if self.round_stage == "preflop":
+                        self.reward += 5 * strength
                     else:
-                        self.reward -= 1 / (equity + 1e-6)
-                elif self.round_stage == 'flop':
-                    if equity > (1 / sum(self.active_players) + 1):
-                        self.reward += 10 * equity
+                        self.reward += self.HAND_RANK_REWARD[self.hand_rank]  
+            else:
+                if self.round_stage == "preflop":
+                    if strength > 0.6:
+                        self.reward -= 1.5 * strength
+                        self._log("FOLD PREFLOP MANO FUERTE")
                     else:
-                        self.reward -= 1 / (equity + 1e-6)
-                elif self.round_stage == 'turn':
-                    if equity > (1 / sum(self.active_players)):
-                        self.reward += 10 * equity
+                        self.reward -= 0.1
+
+                else:
+                    if self.hand_rank <= 7:
+                        self.reward -= 3.0 * (8 - self.hand_rank) / 2
                     else:
-                        self.reward -= 1 / (equity + 1e-6)
-                elif self.round_stage == 'river':
-                    if equity > (1 / sum(self.active_players)):
-                        self.reward += 10 * equity
-                    else:
-                        self.reward -= 1 / (equity + 1e-6)
+                        self.reward -= 0.1
 
         return self._get_obs(), self.reward, self.done, False, {}
-
+    
     def get_legal_actions(self, player_id):
-        """
-        Devuelve una lista de acciones legales (0=fold, 1=check, 2=call, 3=bet, 4=raise)
-        teniendo en cuenta la current_bet y el player_bet.
-        """
         legal = []
         player_bet = self.bets[player_id]
 
@@ -430,7 +476,7 @@ class Poker5EnvFull(Env):
 
         self._log(f"STACKS: {self.stacks}")
         # Log de la mano del héroe
-        self._log(f"HERO HAND: {[Card.int_to_str(c) for c in self.hands[self.agent_id]]}")
+        self._log(f"HERO HAND: {[Card.int_to_str(c) for c in self.hands[self.agent_id]]} - RANK: {self.evaluator.class_to_string(self.hand_rank)}")
 
         # Log de todas las manos con un solo for
         hands_str = {}
@@ -439,9 +485,6 @@ class Poker5EnvFull(Env):
                 hands_str[f"Player {i}"] = [Card.int_to_str(c) for c in hand]
             else:
                 hands_str[f"Player {i}"] = None
-
-        self._log(f"MANOS: {hands_str}")
-        self._log(f"BOARD: {cards_int_to_str(self.board)}")
         
         # Si solo queda un jugador, gana automáticamente
         if len(active_hands) == 1:
@@ -456,11 +499,14 @@ class Poker5EnvFull(Env):
             min_score = min([s for i,s in scores])
             self.winners = [i for i,s in scores if s==min_score]
 
+            if self.stacks[self.agent_id] == 0:
+                self.reward -= 100 * self.hand_rank / 10
+
             share = self.pot // len(self.winners)
             
             for w in self.winners:
                 self.stacks[w] += share
-            
+
             self._log(f"GANADOR(ES) TRAS ALL IN: {self.winners}")
 
         else:
@@ -474,38 +520,17 @@ class Poker5EnvFull(Env):
                 self.stacks[w] += share
             
             self._log(f"GANADOR(ES): {self.winners}")
-
+        
+        self._log(f"MANOS: {hands_str}")
+        self._log(f"BOARD: {cards_int_to_str(self.board)}")
         self._log(f"POT: {self.pot}")
         self._log(f"STACKS TRAS POT: {self.stacks}")
 
-        self.pot = 0 # limpiar el pot
+        self.pot = 0
 
         stack_change = self.stacks[self.agent_id] - self.preflop_stack
-
-        # Equity final
-        hero_str = cards_int_to_str(self.hands[self.agent_id])
-        board_str = cards_int_to_str(self.board[:5])
-        agent_equity_final = estimate_equity(hero_str, board_str=board_str, num_opponents=len(active_hands)-1, iters=2000)['win_prob']
         
         self.reward = stack_change / self.big_blind
-        
-        # Penaliza menos si perdió con buena mano
-        if self.agent_id not in self.winners and stack_change < 0:
-            self.reward -= (1 - agent_equity_final)
-
-        # Penaliza o recompensa fold
-        if self.agent_folded:
-            hands_final = active_hands
-            hands_final.append((self.agent_id, self.hands[self.agent_id]))
-            self.board += self.deck.draw(5 - len(self.board))
-            scores_final = [(i, self.evaluator.evaluate(hand, self.board)) for i, hand in hands_final]
-            min_score_final = min([s for i,s in scores_final])
-            winners_final = [i for i,s in scores_final if s==min_score_final]
-
-            if self.agent_id in winners_final and len(winners_final) == 1:
-                self.reward -= 0.25  # fold incorrecto
-            else:
-                self.reward += 0.25  # fold correcto
 
         self._log(f"REWARD FINAL: {self.reward}")
 

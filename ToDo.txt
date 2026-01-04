@@ -2,5 +2,6 @@ SIGUIENTES PASOS:
 - Iniciar entrenamiento ( Guardar modelo, Gráficas de tensorboard )
 
 PASOS EXTRA:
-- All-in se maneja, pero no correctamente (En caso, de tener tiempo cambiarlo)
-- Ver la reward de los pasos intermedios (Recompensar en base a lo apostado, además del equity)
+- All-in se maneja erroneamente --> Cuando se hace ALL-IN no se reparten todas las cartas (OPCIONAL)
+- Cuando AGENTE FOLDEA --> REWARD intermedia positiva a veces.
+- Pasar las cartas del Hero Hand siempre en el mismo orden (Ascendente)

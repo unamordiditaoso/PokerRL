@@ -10,7 +10,7 @@ from PokerEnv import Poker5EnvFull  # tu entorno
 # Parámetros de entrenamiento
 # ===========================
 SEED = 42
-TOTAL_TIMESTEPS = 20_000
+TOTAL_TIMESTEPS = 100_000
 EVAL_FREQ = 500
 N_EVAL_EPISODES = 30
 REWARD_TARGET = 500  # ajusta según tu entorno
@@ -77,16 +77,14 @@ model = PPO(
     verbose=1,
     seed=SEED,
     tensorboard_log=TENSORBOARD_DIR,
-    learning_rate=2.5e-4,
+
+    learning_rate=3e-4,
     n_steps=2048,
-    batch_size=64,
+    batch_size=256,
     n_epochs=10,
     gamma=0.99,
 )
 
-# ===========================
-# Entrenar el agente
-# ===========================
 model.learn(
     total_timesteps=TOTAL_TIMESTEPS,
     callback=eval_callback,
