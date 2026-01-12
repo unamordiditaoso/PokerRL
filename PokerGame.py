@@ -2,19 +2,18 @@ import pygame
 from PokerEnv import Poker5EnvFull
 from treys import Card, Deck, Evaluator
 from stable_baselines3 import PPO
+from sb3_contrib import MaskablePPO
 
 # --- Inicializar entorno ---
 model1 = PPO.load("checkpoints_poker/PPO7/ppo_poker_final.zip")
-model2 = PPO.load("checkpoints_poker/PPO8/ppo_poker_final.zip")
-model3 = PPO.load("checkpoints_poker/PPO5/ppo_poker_final.zip")
+model2 = MaskablePPO.load("checkpoints_poker/MaskPPO2/ppo_poker_final.zip")
+model3 = MaskablePPO.load("checkpoints_poker/MaskPPO1/ppo_poker_final.zip")
 model4 = PPO.load("checkpoints_poker/PPO6/ppo_poker_final.zip")
 
-modelMask = MaskablePPO.load("checkpoints_poker/best_model.zip")
-
 env = Poker5EnvFull()
-obs = env.__init__(model_player1=modelMask, model_player2=modelMask, model_player3=modelMask, model_player4=modelMask)
+obs = env.__init__(model_player1=model1, model_player2=model2, model_player3=model3, model_player4=model4)
 obs = env.partial_reset()
-model = PPO.load("checkpoints_poker/PPO9/ppo_poker_final.zip")
+model = MaskablePPO.load("checkpoints_poker/MaskPPO2/ppo_poker_final.zip")
 
 # --- Pygame ---
 pygame.init()
@@ -121,7 +120,7 @@ def showdown():
             screen.blit(BACK_CARD, (x, y))
 
     font = pygame.font.SysFont(None, 40)
-    winner_str = "y ".join("Agente" if w == 0 else "Jugador " + str(w+1) for w in env.winners)
+    winner_str = " y ".join("Agente" if w == 0 else "Jugador " + str(w+1) for w in env.winners)
     if len(env.winners) > 1:
         text = f"Ganan {winner_str}"
     else:
@@ -148,13 +147,11 @@ while running:
         if event.type == pygame.QUIT:
             running = False
 
-
-    action, _ = model.predict(obs, deterministic=True)
-
     now = pygame.time.get_ticks()
 
     if now - last_action_time > ACTION_DELAY:
-        action, _ = model.predict(obs, deterministic=True)
+        mask = env.action_masks(0)
+        action, _ = model.predict(obs, action_masks=mask, deterministic=True)
         obs, reward, terminated, truncated, info = env.step(action)
         last_action_time = now
 

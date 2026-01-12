@@ -313,9 +313,9 @@ class Poker5EnvFull(Env):
 
             elif player_id == 2:
                 opp_action, _ = self.model_player2.predict(self._get_obs_player(2), action_masks=mask, deterministic=True)
-                
+
                 self._apply_action(player_id, opp_action)
-                self._log(f"ACTION | player={player_id} (PPO4) | "
+                self._log(f"ACTION | player={player_id} (MaskPPO2) | "
                                 f"action={self.ACTIONS[opp_action]} | "
                                 f"stack={self.stacks[player_id]} | "
                                 f"bet={self.bets[player_id]} | "
@@ -463,7 +463,7 @@ class Poker5EnvFull(Env):
         if action == 0 and player_bet == self.current_bet:
             self._log(f"WARNING 1")
             action_fin = "Check"
-            print(f"Jugador {player_id + 1} tomó acción: Check")
+            print(f"Jugador {player_id + 1} tomó acción: {action_fin}")
             return
 
         # Acción fold
@@ -472,7 +472,11 @@ class Poker5EnvFull(Env):
             self.active_players[player_id] = False
             if player_id == self.agent_id:
                 self.agent_folded = True
-                
+
+        # Acción check
+        elif action == 1:
+            action_fin = "Check"
+
         # Acción call
         elif action == 2:
             to_call = self.current_bet - player_bet
