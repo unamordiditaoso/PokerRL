@@ -4,10 +4,17 @@ from treys import Card, Deck, Evaluator
 from stable_baselines3 import PPO
 
 # --- Inicializar entorno ---
+model1 = PPO.load("checkpoints_poker/PPO7/ppo_poker_final.zip")
+model2 = PPO.load("checkpoints_poker/PPO8/ppo_poker_final.zip")
+model3 = PPO.load("checkpoints_poker/PPO5/ppo_poker_final.zip")
+model4 = PPO.load("checkpoints_poker/PPO6/ppo_poker_final.zip")
+
+modelMask = MaskablePPO.load("checkpoints_poker/best_model.zip")
+
 env = Poker5EnvFull()
-obs = env.__init__()
+obs = env.__init__(model_player1=modelMask, model_player2=modelMask, model_player3=modelMask, model_player4=modelMask)
 obs = env.partial_reset()
-model = PPO.load("checkpoints_poker/PPO3/best_model.zip")
+model = PPO.load("checkpoints_poker/PPO9/ppo_poker_final.zip")
 
 # --- Pygame ---
 pygame.init()

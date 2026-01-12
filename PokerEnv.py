@@ -63,10 +63,14 @@ class Poker5EnvFull(Env):
         with open(self.log_path, "a") as f:
             f.write(msg + "\n")
 
-    def __init__(self, opponent_policies=None, starting_stack=1000, small_blind=10, big_blind=20):
+    def __init__(self, opponent_policies=None, model_player1=None, model_player2=None, model_player3=None, model_player4=None, starting_stack=1000, small_blind=10, big_blind=20):
         super().__init__()
         self.log_path = "env.log"
 
+        self.model_player1 = model_player1
+        self.model_player2 = model_player2
+        self.model_player3 = model_player3
+        self.model_player4 = model_player4
         self.opponent_policies = opponent_policies
         self.dealer_pos = 0
         self.num_players = 5
@@ -169,19 +173,17 @@ class Poker5EnvFull(Env):
         self._log(f"HERO_HAND | {cards_int_to_str(self.hands[self.agent_id])}")
 
         # Políticas oponentes
-        if self.opponent_policies is None:
-            self.opponent_policies = [
-                lambda obs: policy_player1(self.hands[1], obs["board"], num_opponents=4),
-                lambda obs: policy_player2(self.hands[2], obs["board"], num_opponents=4),
-                lambda obs: policy_player3(self.hands[3], obs["board"], num_opponents=4),
-                lambda obs: policy_player4(self.hands[4], obs["board"], num_opponents=4),
-            ]
-        else:
-            assert len(self.opponent_policies) == self.num_players - 1
+        # if self.opponent_policies is None:
+        #    self.opponent_policies = [
+        #        lambda obs: policy_player1(self.hands[1], obs["board"], num_opponents=4)
+        #    ]
+        # else:
+        #    assert len(self.opponent_policies) == 1
 
         # Retornar la observación inicial de la mano
         return self._get_obs()
 
+    
     def card_as_index(self, card_int: int) -> int:
         """
         Convierte un entero de Treys a un índice 0..51
@@ -226,9 +228,8 @@ class Poker5EnvFull(Env):
         return -0.2
 
     def _get_obs(self):
-        board = self.board[:5]  # solo primeros 5
+        board = self.board[:5]
         board += [None]*(5-len(board))
-        #board = self.board + [None]*(5-len(self.board))
         return {
             "hero_hand": [self.card_as_index(c) for c in self.hands[self.agent_id]],
             "board": [self.card_as_index(c) if c is not None else 52 for c in board],
@@ -238,6 +239,20 @@ class Poker5EnvFull(Env):
             "active_players": np.array(self.active_players, dtype=np.int8),
             "hand_rank": self.get_hand_rank(self.hands[self.agent_id], self.board)
         }
+
+    def _get_obs_player(self, player_id):
+        board = self.board[:5]
+        board += [None]*(5-len(board))
+        return {
+            "hero_hand": [self.card_as_index(c) for c in self.hands[player_id]],
+            "board": [self.card_as_index(c) if c is not None else 52 for c in board],
+            "stacks": np.array(self.stacks, dtype=np.float32),
+            "pot": np.array([self.pot], dtype=np.float32),
+            "current_bet": np.array([self.current_bet], dtype=np.float32),
+            "active_players": np.array(self.active_players, dtype=np.int8),
+            "hand_rank": self.get_hand_rank(self.hands[self.agent_id], self.board)
+        }
+
 
     def step(self, action=None):
         """Step del agente; los oponentes reaccionan internamente"""
@@ -265,7 +280,9 @@ class Poker5EnvFull(Env):
             if not self.active_players[player_id] or self.done:
                 self.all_check[player_id] = True
                 continue
-
+            
+            mask = self.action_masks(player_id)
+            
             # Agente
             if player_id == self.agent_id:
                 if action is not None:
@@ -278,10 +295,50 @@ class Poker5EnvFull(Env):
                                 f"pot={self.pot}")
 
             # Oponentes
-            else:
-                opp_action = self.opponent_policies[player_id-1](self._get_obs())
+            elif player_id == 1:
+                # opp_action = self.opponent_policies[0](self._get_obs_player(player_id))
+                opp_action, _ = self.model_player1.predict(self._get_obs_player(1), deterministic=True)
+
+                if not mask.any():
+                    opp_action = 2
+                elif not mask[opp_action]:
+                    opp_action = np.where(mask)[0][0]
+
                 self._apply_action(player_id, opp_action)
-                self._log(f"ACTION | player={player_id} | "
+                self._log(f"ACTION | player={player_id} (PPO7) | "
+                                f"action={self.ACTIONS[opp_action]} | "
+                                f"stack={self.stacks[player_id]} | "
+                                f"bet={self.bets[player_id]} | "
+                                f"pot={self.pot}")
+
+            elif player_id == 2:
+                opp_action, _ = self.model_player2.predict(self._get_obs_player(2), action_masks=mask, deterministic=True)
+                
+                self._apply_action(player_id, opp_action)
+                self._log(f"ACTION | player={player_id} (PPO4) | "
+                                f"action={self.ACTIONS[opp_action]} | "
+                                f"stack={self.stacks[player_id]} | "
+                                f"bet={self.bets[player_id]} | "
+                                f"pot={self.pot}")
+            elif player_id == 3:
+                opp_action, _ = self.model_player3.predict(self._get_obs_player(3), action_masks=mask, deterministic=True)
+                
+                self._apply_action(player_id, opp_action)
+                self._log(f"ACTION | player={player_id} (MaskPPO1) | "
+                                f"action={self.ACTIONS[opp_action]} | "
+                                f"stack={self.stacks[player_id]} | "
+                                f"bet={self.bets[player_id]} | "
+                                f"pot={self.pot}")
+            else:
+                opp_action, _ = self.model_player4.predict(self._get_obs_player(4), deterministic=True)
+                
+                if not mask.any():
+                    opp_action = 2
+                elif not mask[opp_action]:
+                    opp_action = np.where(mask)[0][0]
+                
+                self._apply_action(player_id, opp_action)
+                self._log(f"ACTION | player={player_id} (PPO6) | "
                                 f"action={self.ACTIONS[opp_action]} | "
                                 f"stack={self.stacks[player_id]} | "
                                 f"bet={self.bets[player_id]} | "
@@ -347,62 +404,71 @@ class Poker5EnvFull(Env):
             else:
                 if self.round_stage == "preflop":
                     if strength > 0.6:
-                        self.reward -= 1.5 * strength
+                        self.reward -= 1 * strength
                         self._log("FOLD PREFLOP MANO FUERTE")
+                    elif strength < 0.4:
+                        self.reward += 0.3
                     else:
-                        self.reward -= 0.1
-
+                        self.reward -= 0.2
                 else:
                     if self.hand_rank <= 7:
                         self.reward -= 3.0 * (8 - self.hand_rank) / 2
+                    elif self.hand_rank == 9:
+                        self.reward += 0.5
+                    elif self.hand_rank == 8 and self.round_stage == "river":
+                        ranks = sorted([c % 13 for c in self.hands[self.agent_id]])
+                        if max(ranks) < 10:
+                            self.reward += 0.1
                     else:
-                        self.reward -= 0.1
+                        self.reward -= 0.2
 
         return self._get_obs(), self.reward, self.done, False, {}
     
-    def get_legal_actions(self, player_id):
-        legal = []
-        player_bet = self.bets[player_id]
+    def action_masks(self, player_id=None):
+        """
+        Devuelve un array booleano de tamaño 5 indicando acciones legales:
+        0=Fold, 1=Check, 2=Call, 3=Bet, 4=Raise
+        """
+        if player_id is None:
+            player_id = self.agent_id
 
-        if self.agent_folded:
-            return legal
+        if not self.active_players[player_id]:
+            return np.array([False, False, False, False, False], dtype=bool)
 
-        if player_bet == self.current_bet:
-            legal.append(1)
-        else:
-            # --- CALL ---
-            legal.append(2)
+        stack = self.stacks[player_id]
+        player_current_bet = self.bets[player_id]
 
-        # --- BET ---
-        # Solo si no hay apuestas previas
+        can_fold = player_current_bet < self.current_bet and stack >= 0
+        can_check = self.current_bet == player_current_bet
+        can_call = self.current_bet > player_current_bet
+        can_bet = self.current_bet == 0 and stack >= self.big_blind
+
         if self.current_bet == 0:
-            legal.append(3)
+            raise_amount = 2 * self.big_blind
+        else:
+            raise_amount = self.current_bet + 2 * self.big_blind
 
-        # --- RAISE ---
-        legal.append(4)
+        can_raise = stack >= raise_amount
 
-        # --- FOLD ---
-        # Solo si player_bet < current_bet
-        if player_bet < self.current_bet:
-            legal.append(0)
-
-        return legal
+        return np.array([can_fold, can_check, can_call, can_bet, can_raise], dtype=bool)
 
     def _apply_action(self, player_id, action):
         if not self.active_players[player_id] or self.all_in[player_id]:
             return
         
         player_bet = self.bets[player_id]
-        accion_opp = ""
+        action_fin = ""
         stack = self.stacks[player_id]
 
         if action == 0 and player_bet == self.current_bet:
+            self._log(f"WARNING 1")
+            action_fin = "Check"
             print(f"Jugador {player_id + 1} tomó acción: Check")
             return
 
         # Acción fold
         if action == 0:
-            accion_opp = "Fold"
+            action_fin = "Fold"
             self.active_players[player_id] = False
             if player_id == self.agent_id:
                 self.agent_folded = True
@@ -412,15 +478,16 @@ class Poker5EnvFull(Env):
             to_call = self.current_bet - player_bet
 
             if to_call <= 0:
-                accion_opp = "Check"
+                self._log(f"WARNING 2")
+                action_fin = "Check"
                 amount = 0
             
             elif to_call >= stack:
-                accion_opp = "Call (All-in)"
+                action_fin = "Call (All-in)"
                 self.all_in[player_id] = True
                 amount = stack
             else:
-                accion_opp = "Call"
+                action_fin = "Call"
                 amount = to_call
 
             self.stacks[player_id] -= amount
@@ -430,14 +497,15 @@ class Poker5EnvFull(Env):
         # Acción bet
         elif action == 3:
             if self.current_bet > 0:
+                self._log(f"WARNING 3")
                 return self._apply_action(player_id, 2)
 
             if stack <= self.big_blind:
                 self.all_in[player_id] = True
-                accion_opp = "Bet (All-in)"
+                action_fin = "Bet (All-in)"
                 amount = stack
             else:
-                accion_opp = "Bet"
+                action_fin = "Bet"
                 amount = self.big_blind
                 
 
@@ -455,11 +523,11 @@ class Poker5EnvFull(Env):
                 to_raise = 2 * self.current_bet
             
             if stack + player_bet <= to_raise:
-                accion_opp = "Raise (All-in)"
+                action_fin = "Raise (All-in)"
                 amount = stack
                 self.all_in[player_id] = True
             else:
-                accion_opp = "Raise"
+                action_fin = "Raise"
                 amount = to_raise - player_bet
 
             self.stacks[player_id] -= amount
@@ -469,7 +537,7 @@ class Poker5EnvFull(Env):
             self.current_bet = self.bets[player_id]
         
         if player_id != 0: 
-            print(f"Jugador {player_id + 1} tomó acción: {accion_opp}")
+            print(f"Jugador {player_id + 1} tomó acción: {action_fin}")
 
     def _resolve_hand(self):
         active_hands = [(i, self.hands[i]) for i, active in enumerate(self.active_players) if active]
